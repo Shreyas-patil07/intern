@@ -45,6 +45,11 @@ const orderSchema = new mongoose.Schema(
       required: true,
       trim: true
     },
+    couponCode: {
+      type: String,
+      trim: true,
+      uppercase: true
+    },
     paymentStatus: {
       type: String,
       enum: ['pending', 'paid', 'failed'],
@@ -54,6 +59,24 @@ const orderSchema = new mongoose.Schema(
       type: String,
       enum: ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'],
       default: 'pending'
+    },
+    refundRequested: {
+      type: Boolean,
+      default: false
+    },
+    fraudRiskScore: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    isSuspicious: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+    fraudReasons: {
+      type: [String],
+      default: []
     }
   },
   { timestamps: true }
