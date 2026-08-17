@@ -7,29 +7,16 @@ exports.getAllUsers = async (req, res) => {
   try {
     const users = await User.find().select('-password');
 
-    return res.status(200).json({
-      success: true,
-      data: users,
-      count: users.length
-    });
+    return res.status(200).json({ success: true, data: users, count: users.length });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.toggleBlockUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     user.isblocked = !user.isblocked;
     await user.save();
@@ -40,23 +27,14 @@ exports.toggleBlockUser = async (req, res) => {
       data: user
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.approveRestaurant = async (req, res) => {
   try {
     const restaurant = await Restaurant.findById(req.params.id);
-
-    if (!restaurant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Restaurant not found'
-      });
-    }
+    if (!restaurant) return res.status(404).json({ success: false, message: 'Restaurant not found' });
 
     restaurant.isApproved = !restaurant.isApproved;
     await restaurant.save();
@@ -67,10 +45,81 @@ exports.approveRestaurant = async (req, res) => {
       data: restaurant
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.createRestaurant = async (req, res) => {
+  try {
+    const { owner, name, city, address } = req.body;
+
+    if (!owner || !name || !city || !address) {
+      return res.status(400).json({
+        success: false,
+        message: 'owner, name, city and address are required'
+      });
+    }
+
+    const ownerUser = await User.findById(owner);
+    if (!ownerUser || ownerUser.role !== 'restaurant') {
+      return res.status(400).json({
+        success: false,
+        message: 'owner must be an existing restaurant user'
+      });
+    }
+
+    const existing = await Restaurant.findOne({ owner });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Owner already has a restaurant' });
+    }
+
+    const restaurant = await Restaurant.create({
+      ...req.body,
+      isApproved: req.body.isApproved ?? true
     });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Restaurant created successfully by admin',
+      data: restaurant
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateRestaurant = async (req, res) => {
+  try {
+    const restaurant = await Restaurant.findById(req.params.restaurantId);
+    if (!restaurant) return res.status(404).json({ success: false, message: 'Restaurant not found' });
+
+    const allowedFields = [
+      'name',
+      'city',
+      'address',
+      'cuisine',
+      'rating',
+      'priceRange',
+      'estimatedDeliveryTime',
+      'isVegOnly',
+      'popularity',
+      'image',
+      'isApproved'
+    ];
+
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) restaurant[field] = req.body[field];
+    }
+
+    await restaurant.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Restaurant updated successfully by admin',
+      data: restaurant
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -80,16 +129,9 @@ exports.getAllOrders = async (req, res) => {
       .populate('user', 'name email')
       .populate('restaurant', 'name');
 
-    return res.status(200).json({
-      success: true,
-      data: orders,
-      count: orders.length
-    });
+    return res.status(200).json({ success: true, data: orders, count: orders.length });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -101,15 +143,8 @@ exports.getPlatformStatistics = async (req, res) => {
 
     const revenueResult = await Order.aggregate([
       { $match: { paymentStatus: 'paid' } },
-      {
-        $group: {
-          _id: null,
-          totalRevenue: { $sum: '$totalAmount' }
-        }
-      }
+      { $group: { _id: null, totalRevenue: { $sum: '$totalAmount' } } }
     ]);
-
-    const totalRevenue = revenueResult[0]?.totalRevenue || 0;
 
     return res.status(200).json({
       success: true,
@@ -117,14 +152,11 @@ exports.getPlatformStatistics = async (req, res) => {
         totalUsers,
         totalRestaurants,
         totalOrders,
-        totalRevenue
+        totalRevenue: revenueResult[0]?.totalRevenue || 0
       }
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -135,11 +167,7 @@ exports.getFraudOrders = async (req, res) => {
       .populate('order')
       .populate('user', 'name email role isblocked fraudRestrictedUntil');
 
-    return res.status(200).json({
-      success: true,
-      data: reviews,
-      count: reviews.length
-    });
+    return res.status(200).json({ success: true, data: reviews, count: reviews.length });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -148,16 +176,10 @@ exports.getFraudOrders = async (req, res) => {
 const updateFraudReview = async (req, res, nextStatus, action) => {
   try {
     const review = await FraudReview.findOne({ order: req.params.orderId });
-
-    if (!review) {
-      return res.status(404).json({ success: false, message: 'Fraud review not found' });
-    }
+    if (!review) return res.status(404).json({ success: false, message: 'Fraud review not found' });
 
     const order = await Order.findById(review.order);
-
-    if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
-    }
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
     review.status = nextStatus;
     review.action = action;
@@ -170,18 +192,10 @@ const updateFraudReview = async (req, res, nextStatus, action) => {
       order.fraudReasons = [];
       order.fraudRiskScore = 0;
     }
-
-    if (nextStatus === 'rejected') {
-      order.orderStatus = 'cancelled';
-    }
-
+    if (nextStatus === 'rejected') order.orderStatus = 'cancelled';
     await order.save();
 
-    return res.status(200).json({
-      success: true,
-      message: `Fraud review ${nextStatus}`,
-      data: { review, order }
-    });
+    return res.status(200).json({ success: true, message: `Fraud review ${nextStatus}`, data: { review, order } });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -193,17 +207,11 @@ exports.rejectFraudOrder = (req, res) => updateFraudReview(req, res, 'rejected',
 exports.restrictFraudUser = async (req, res) => {
   try {
     const review = await FraudReview.findOne({ order: req.params.orderId });
-
-    if (!review) {
-      return res.status(404).json({ success: false, message: 'Fraud review not found' });
-    }
+    if (!review) return res.status(404).json({ success: false, message: 'Fraud review not found' });
 
     const durationHours = Math.min(Math.max(Number(req.body.hours) || 24, 1), 168);
     const user = await User.findById(review.user);
-
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     user.fraudRestrictedUntil = new Date(Date.now() + durationHours * 60 * 60 * 1000);
     await user.save();
@@ -217,10 +225,7 @@ exports.restrictFraudUser = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: `User temporarily restricted for ${durationHours} hours`,
-      data: {
-        userId: user._id,
-        restrictedUntil: user.fraudRestrictedUntil
-      }
+      data: { userId: user._id, restrictedUntil: user.fraudRestrictedUntil }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
