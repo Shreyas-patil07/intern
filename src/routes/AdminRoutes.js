@@ -6,6 +6,8 @@ const {
   getAllUsers,
   toggleBlockUser,
   approveRestaurant,
+  createRestaurant,
+  updateRestaurant,
   getAllOrders,
   getPlatformStatistics,
   getFraudOrders,
@@ -20,6 +22,8 @@ router.use(authorize('admin'));
 router.get('/', getAllUsers);
 router.put('/users/:id/block', toggleBlockUser);
 router.put('/restaurant/:id/approve', approveRestaurant);
+router.post('/restaurants/create', createRestaurant);
+router.put('/restaurants/update/:restaurantId', updateRestaurant);
 router.get('/statistics', getPlatformStatistics);
 router.get('/orders', getAllOrders);
 
