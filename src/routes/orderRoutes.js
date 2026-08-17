@@ -3,6 +3,7 @@ const router = express.Router();
 
 const { protect, authorize } = require('../middleware/authMiddleware');
 const {
+  calculateDelivery,
   placeOrder,
   mockPayment,
   cancelOrder,
@@ -13,6 +14,7 @@ const {
 
 router.use(protect);
 
+router.post('/calculate-delivery-fee', authorize('user'), calculateDelivery);
 router.post('/', authorize('user'), placeOrder);
 router.post('/create', authorize('user'), placeOrder);
 router.post('/verify', authorize('user'), mockPayment);
