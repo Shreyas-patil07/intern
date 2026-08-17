@@ -5,6 +5,7 @@ const { assessOrder } = require('../services/fraudService');
 const { calculateDeliveryFee } = require('../services/surgePricingService');
 const { assignDeliveryPartner } = require('../services/deliveryAssignmentService');
 const { emitOrderStatusChange } = require('../services/realtimeService');
+const { updateUserPreferences } = require('../services/recommendationService');
 
 const calculateDelivery = async (req, res) => {
   try {
@@ -66,6 +67,7 @@ const placeOrder = async (req, res) => {
     await Cart.findOneAndDelete({ user: req.user._id });
     const fraudAssessment = await assessOrder({ order, couponCode });
     const assignment = await assignOrder(order);
+    await updateUserPreferences(req.user._id, order._id);
     await emitOrderStatusChange({ order, previousStatus: null, changedBy: req.user._id });
 
     return res.status(201).json({
