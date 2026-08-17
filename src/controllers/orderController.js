@@ -3,9 +3,19 @@ const Cart = require('../models/Cart');
 const Restaurant = require('../models/restaurant');
 const { assessOrder } = require('../services/fraudService');
 const { calculateDeliveryFee } = require('../services/surgePricingService');
-const { assignDeliveryPartner } = require('../services/deliveryAssignmentService');
-const { emitOrderStatusChange } = require('../services/realtimeService');
+const { assignDeliveryPartner, releaseDeliveryPartner } = require('../services/deliveryAssignmentService');
+const { emitOrderStatusChange, emitDeliveryAssignmentChange } = require('../services/realtimeService');
 const { updateUserPreferences } = require('../services/recommendationService');
+
+const ALLOWED_STATUSES = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'];
+const STATUS_TRANSITIONS = {
+  pending: ['confirmed', 'cancelled'],
+  confirmed: ['preparing', 'cancelled'],
+  preparing: ['out_for_delivery', 'cancelled'],
+  out_for_delivery: ['delivered'],
+  delivered: [],
+  cancelled: []
+};
 
 const calculateDelivery = async (req, res) => {
   try {
@@ -36,6 +46,7 @@ const assignOrder = async (order) => {
   order.assignmentAttempts += 1;
   await order.save();
 
+  await emitDeliveryAssignmentChange({ order, partnerId: assignment.partner.user });
   return assignment;
 };
 
@@ -88,13 +99,8 @@ const placeOrder = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const allowedStatuses = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'];
-
-    if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid status. Allowed values: ${allowedStatuses.join(', ')}`
-      });
+    if (!ALLOWED_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: `Invalid status. Allowed values: ${ALLOWED_STATUSES.join(', ')}` });
     }
 
     const order = await Order.findById(req.params.orderId).populate('restaurant', 'owner');
@@ -120,30 +126,25 @@ const updateOrderStatus = async (req, res) => {
     }
 
     const previousStatus = order.orderStatus;
-    if (previousStatus === status) {
-      return res.status(400).json({ success: false, message: 'Order is already in this status' });
+    if (previousStatus === status) return res.status(400).json({ success: false, message: 'Order is already in this status' });
+    if (!STATUS_TRANSITIONS[previousStatus]?.includes(status)) {
+      return res.status(409).json({ success: false, message: `Invalid status transition: ${previousStatus} -> ${status}` });
     }
 
     order.orderStatus = status;
     order.statusHistory.push({ status, changedBy: req.user._id, changedAt: new Date() });
 
-    if (status === 'delivered') {
+    if (status === 'delivered' || status === 'cancelled') {
+      const partnerId = order.assignedDeliveryPartner;
       order.assignmentStatus = 'completed';
+      order.assignedDeliveryPartner = null;
+      if (partnerId) await releaseDeliveryPartner(partnerId);
     }
 
     await order.save();
-    const notification = await emitOrderStatusChange({
-      order,
-      previousStatus,
-      changedBy: req.user._id
-    });
+    const notification = await emitOrderStatusChange({ order, previousStatus, changedBy: req.user._id });
 
-    return res.status(200).json({
-      success: true,
-      message: 'Order status updated successfully',
-      data: order,
-      notification
-    });
+    return res.status(200).json({ success: true, message: 'Order status updated successfully', data: order, notification });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -153,10 +154,12 @@ const mockPayment = async (req, res) => {
   try {
     const orderId = req.body.orderId || req.params.orderId;
     if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
+
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
     if (order.user.toString() !== req.user._id.toString()) return res.status(403).json({ success: false, message: 'You are not authorized to pay for this order' });
     if (order.isSuspicious) return res.status(403).json({ success: false, message: 'Order is pending fraud review before payment can be completed' });
+    if (order.orderStatus !== 'pending') return res.status(400).json({ success: false, message: 'Only pending orders can be paid' });
 
     const previousStatus = order.orderStatus;
     order.paymentStatus = 'paid';
@@ -179,12 +182,17 @@ const cancelOrder = async (req, res) => {
     if (!['pending', 'confirmed'].includes(order.orderStatus)) return res.status(400).json({ success: false, message: 'This order can no longer be cancelled' });
 
     const previousStatus = order.orderStatus;
+    const partnerId = order.assignedDeliveryPartner;
     order.orderStatus = 'cancelled';
     order.assignmentStatus = 'completed';
+    order.assignedDeliveryPartner = null;
     order.statusHistory.push({ status: 'cancelled', changedBy: req.user._id, changedAt: new Date() });
+    if (partnerId) await releaseDeliveryPartner(partnerId);
     await order.save();
+
     const fraudAssessment = await assessOrder({ order });
     await emitOrderStatusChange({ order, previousStatus, changedBy: req.user._id });
+    await emitDeliveryAssignmentChange({ order, partnerId: null, previousPartnerId: partnerId });
 
     return res.status(200).json({ success: true, message: 'Order cancelled successfully', data: order, fraud: fraudAssessment });
   } catch (error) {
@@ -225,7 +233,7 @@ const getMyOrders = async (req, res) => {
 const getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId)
-      .populate('restaurant', 'name city address image location')
+      .populate('restaurant', 'name city address image location owner')
       .populate('items.menuItem', 'name price image')
       .populate('user', 'name email')
       .populate('assignedDeliveryPartner', 'name email role');
@@ -235,8 +243,9 @@ const getOrderById = async (req, res) => {
     const isOwner = order.user._id.toString() === req.user._id.toString();
     const isAssignedPartner = order.assignedDeliveryPartner?._id?.toString() === req.user._id.toString();
     const isAdmin = req.user.role === 'admin';
+    const isRestaurantOwner = req.user.role === 'restaurant' && order.restaurant.owner?.toString() === req.user._id.toString();
 
-    if (!isOwner && !isAssignedPartner && !isAdmin) {
+    if (!isOwner && !isAssignedPartner && !isAdmin && !isRestaurantOwner) {
       return res.status(403).json({ success: false, message: 'You are not authorized to view this order' });
     }
 
