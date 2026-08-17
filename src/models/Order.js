@@ -23,7 +23,13 @@ const orderSchema = new mongoose.Schema(
     refundRequested: { type: Boolean, default: false },
     fraudRiskScore: { type: Number, default: 0, min: 0 },
     isSuspicious: { type: Boolean, default: false, index: true },
-    fraudReasons: { type: [String], default: [] }
+    fraudReasons: { type: [String], default: [] },
+    assignedDeliveryPartner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    deliveryAssignmentHistory: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    assignmentStatus: { type: String, enum: ['unassigned', 'assigned', 'declined', 'completed'], default: 'unassigned' },
+    assignmentDistanceMeters: { type: Number, default: null, min: 0 },
+    assignedAt: { type: Date, default: null },
+    assignmentAttempts: { type: Number, default: 0, min: 0 }
   },
   { timestamps: true }
 );
