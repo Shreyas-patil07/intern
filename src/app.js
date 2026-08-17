@@ -4,6 +4,7 @@ const authRoutes = require('./routes/authRoutes');
 const restaurantRoutes = require('./routes/restaurantRoute');
 const menuRoutes = require('./routes/menuRoute');
 const cartRoutes = require('./routes/cartRoutes');
+const orderRoutes = require('./routes/orderRoutes');
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/cart', cartRoutes);
+app.use('/api/orders', orderRoutes);
 
 app.get('/', (req, res) => {
   res.status(200).json({
