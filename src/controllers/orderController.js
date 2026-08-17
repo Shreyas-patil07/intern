@@ -1,10 +1,11 @@
 const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Restaurant = require('../models/restaurant');
+const { assessOrder } = require('../services/fraudService');
 
-exports.placeOrder = async (req, res) => {
+const placeOrder = async (req, res) => {
   try {
-    const { deliveryAddress } = req.body;
+    const { deliveryAddress, couponCode } = req.body;
 
     if (!deliveryAddress || !deliveryAddress.trim()) {
       return res.status(400).json({
@@ -48,15 +49,25 @@ exports.placeOrder = async (req, res) => {
       restaurant: cart.restaurant._id,
       items,
       totalAmount,
-      deliveryAddress: deliveryAddress.trim()
+      deliveryAddress: deliveryAddress.trim(),
+      couponCode: couponCode?.trim() || undefined
     });
 
     await Cart.findOneAndDelete({ user: req.user._id });
 
+    const fraudAssessment = await assessOrder({ order, couponCode });
+
     return res.status(201).json({
       success: true,
-      message: 'Order placed successfully',
-      data: order
+      message: fraudAssessment.suspicious
+        ? 'Order placed and flagged for fraud review'
+        : 'Order placed successfully',
+      data: order,
+      fraud: {
+        riskScore: fraudAssessment.riskScore,
+        suspicious: fraudAssessment.suspicious,
+        reasons: fraudAssessment.reasons
+      }
     });
   } catch (error) {
     return res.status(500).json({
@@ -66,7 +77,7 @@ exports.placeOrder = async (req, res) => {
   }
 };
 
-exports.mockPayment = async (req, res) => {
+const mockPayment = async (req, res) => {
   try {
     const orderId = req.body.orderId || req.params.orderId;
 
@@ -93,6 +104,13 @@ exports.mockPayment = async (req, res) => {
       });
     }
 
+    if (order.isSuspicious) {
+      return res.status(403).json({
+        success: false,
+        message: 'Order is pending fraud review before payment can be completed'
+      });
+    }
+
     order.paymentStatus = 'paid';
     order.orderStatus = 'confirmed';
     await order.save();
@@ -109,7 +127,94 @@ exports.mockPayment = async (req, res) => {
   }
 };
 
-exports.getMyOrders = async (req, res) => {
+const cancelOrder = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    if (order.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to cancel this order'
+      });
+    }
+
+    if (!['pending', 'confirmed'].includes(order.orderStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This order can no longer be cancelled'
+      });
+    }
+
+    order.orderStatus = 'cancelled';
+    await order.save();
+
+    const fraudAssessment = await assessOrder({ order });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Order cancelled successfully',
+      data: order,
+      fraud: {
+        riskScore: fraudAssessment.riskScore,
+        suspicious: fraudAssessment.suspicious,
+        reasons: fraudAssessment.reasons
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+const requestRefund = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId);
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'You are not authorized to request a refund' });
+    }
+
+    if (order.paymentStatus !== 'paid') {
+      return res.status(400).json({ success: false, message: 'Only paid orders can have refund requests' });
+    }
+
+    if (order.refundRequested) {
+      return res.status(400).json({ success: false, message: 'Refund request already exists' });
+    }
+
+    order.refundRequested = true;
+    await order.save();
+
+    const fraudAssessment = await assessOrder({ order });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Refund request submitted',
+      fraud: {
+        riskScore: fraudAssessment.riskScore,
+        suspicious: fraudAssessment.suspicious,
+        reasons: fraudAssessment.reasons
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getMyOrders = async (req, res) => {
   try {
     const orders = await Order.find({ user: req.user._id })
       .sort({ createdAt: -1 })
@@ -128,7 +233,7 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
-exports.getRestaurantOrders = async (req, res) => {
+const getRestaurantOrders = async (req, res) => {
   try {
     const restaurant = await Restaurant.findOne({ owner: req.user._id });
 
@@ -154,4 +259,13 @@ exports.getRestaurantOrders = async (req, res) => {
       message: error.message
     });
   }
+};
+
+module.exports = {
+  placeOrder,
+  mockPayment,
+  cancelOrder,
+  requestRefund,
+  getMyOrders,
+  getRestaurantOrders
 };
