@@ -8,9 +8,11 @@ const {
   getAllRestaurants,
   searchRestaurants
 } = require('../controllers/restaurantController');
+const { getUserRecommendations } = require('../controllers/recommendationController');
 const { protect } = require('../middleware/authMiddleware');
 
 router.get('/search', searchRestaurants);
+router.get('/recommendations/:userId', protect, getUserRecommendations);
 router.post('/', protect, createRestaurant);
 router.get('/my', protect, getMyRestaurant);
 router.put('/:id', protect, updateRestaurant);
