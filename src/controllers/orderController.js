@@ -4,6 +4,15 @@ const Restaurant = require('../models/restaurant');
 
 exports.placeOrder = async (req, res) => {
   try {
+    const { deliveryAddress } = req.body;
+
+    if (!deliveryAddress || !deliveryAddress.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Delivery address is required'
+      });
+    }
+
     const cart = await Cart.findOne({ user: req.user._id })
       .populate('items.menuItem')
       .populate('restaurant');
@@ -24,6 +33,8 @@ exports.placeOrder = async (req, res) => {
 
     const items = cart.items.map((item) => ({
       menuItem: item.menuItem._id,
+      name: item.menuItem.name,
+      price: item.menuItem.price,
       quantity: item.quantity
     }));
 
@@ -36,7 +47,8 @@ exports.placeOrder = async (req, res) => {
       user: req.user._id,
       restaurant: cart.restaurant._id,
       items,
-      totalAmount
+      totalAmount,
+      deliveryAddress: deliveryAddress.trim()
     });
 
     await Cart.findOneAndDelete({ user: req.user._id });
@@ -56,7 +68,15 @@ exports.placeOrder = async (req, res) => {
 
 exports.mockPayment = async (req, res) => {
   try {
-    const { orderId } = req.params;
+    const orderId = req.body.orderId || req.params.orderId;
+
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: 'orderId is required'
+      });
+    }
+
     const order = await Order.findById(orderId);
 
     if (!order) {
@@ -79,8 +99,7 @@ exports.mockPayment = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Payment successful, order confirmed',
-      data: order
+      message: 'Mock payment successful'
     });
   } catch (error) {
     return res.status(500).json({
