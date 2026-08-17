@@ -51,106 +51,57 @@ const fuzzyMatch = (query, restaurant) => {
 exports.createRestaurant = async (req, res) => {
   try {
     if (req.user.role !== 'restaurant') {
-      return res.status(403).json({
-        success: false,
-        message: 'Only restaurant owners can create restaurants'
-      });
+      return res.status(403).json({ success: false, message: 'Only restaurant owners can create restaurants' });
     }
 
     const existingRestaurant = await Restaurant.findOne({ owner: req.user._id });
-
     if (existingRestaurant) {
-      return res.status(400).json({
-        success: false,
-        message: 'You already have a restaurant registered'
-      });
+      return res.status(400).json({ success: false, message: 'You already have a restaurant registered' });
     }
 
-    const restaurant = await Restaurant.create({
-      ...req.body,
-      owner: req.user._id
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: 'Restaurant created successfully',
-      data: restaurant
-    });
+    const restaurant = await Restaurant.create({ ...req.body, owner: req.user._id });
+    return res.status(201).json({ success: true, message: 'Restaurant created successfully', data: restaurant });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Error creating restaurant',
-      error: error.message
-    });
+    return res.status(500).json({ success: false, message: 'Error creating restaurant', error: error.message });
   }
 };
 
 exports.getMyRestaurant = async (req, res) => {
   try {
     const restaurant = await Restaurant.findOne({ owner: req.user._id });
-
-    if (!restaurant) {
-      return res.status(404).json({
-        success: false,
-        message: "You don't have a restaurant registered"
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: restaurant
-    });
+    if (!restaurant) return res.status(404).json({ success: false, message: "You don't have a restaurant registered" });
+    return res.status(200).json({ success: true, data: restaurant });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Error fetching restaurant',
-      error: error.message
-    });
+    return res.status(500).json({ success: false, message: 'Error fetching restaurant', error: error.message });
   }
 };
 
 exports.updateRestaurant = async (req, res) => {
   try {
-    const restaurant = await Restaurant.findOne({ owner: req.user._id });
+    const restaurant = await Restaurant.findOne({
+      _id: req.params.id,
+      owner: req.user._id
+    });
 
     if (!restaurant) {
       return res.status(404).json({
         success: false,
-        message: "You don't have a restaurant registered"
+        message: 'Restaurant not found or you are not authorized to update it'
       });
     }
 
-    if (restaurant.owner.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not authorized to update this restaurant'
-      });
-    }
+    const protectedFields = ['owner', 'isApproved'];
+    for (const field of protectedFields) delete req.body[field];
 
-    const updatedRestaurant = await Restaurant.findByIdAndUpdate(
-      req.params.id,
+    const updatedRestaurant = await Restaurant.findOneAndUpdate(
+      { _id: req.params.id, owner: req.user._id },
       req.body,
       { new: true, runValidators: true }
     );
 
-    if (!updatedRestaurant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Restaurant not found'
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Restaurant updated successfully',
-      data: updatedRestaurant
-    });
+    return res.status(200).json({ success: true, message: 'Restaurant updated successfully', data: updatedRestaurant });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Error updating restaurant',
-      error: error.message
-    });
+    return res.status(500).json({ success: false, message: 'Error updating restaurant', error: error.message });
   }
 };
 
@@ -169,16 +120,9 @@ exports.getAllRestaurants = async (req, res) => {
       .skip((pageNumber - 1) * limitNumber)
       .limit(limitNumber);
 
-    return res.status(200).json({
-      success: true,
-      data: restaurants
-    });
+    return res.status(200).json({ success: true, data: restaurants });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Error fetching restaurants',
-      error: error.message
-    });
+    return res.status(500).json({ success: false, message: 'Error fetching restaurants', error: error.message });
   }
 };
 
@@ -204,7 +148,6 @@ exports.searchRestaurants = async (req, res) => {
     const pageNumber = Math.max(Number(page) || 1, 1);
     const limitNumber = Math.min(Math.max(Number(limit) || 20, 1), 100);
     const pipeline = [];
-
     const match = { isApproved: true };
 
     if (cuisine) {
@@ -214,12 +157,8 @@ exports.searchRestaurants = async (req, res) => {
 
     const minimumRating = Number(minRating ?? rating);
     const maximumRating = Number(maxRating);
-    if (Number.isFinite(minimumRating)) {
-      match.rating = { ...(match.rating || {}), $gte: minimumRating };
-    }
-    if (Number.isFinite(maximumRating)) {
-      match.rating = { ...(match.rating || {}), $lte: maximumRating };
-    }
+    if (Number.isFinite(minimumRating)) match.rating = { ...(match.rating || {}), $gte: minimumRating };
+    if (Number.isFinite(maximumRating)) match.rating = { ...(match.rating || {}), $lte: maximumRating };
 
     const minimumPrice = Number(minPrice);
     const maximumPrice = Number(maxPrice);
@@ -274,7 +213,6 @@ exports.searchRestaurants = async (req, res) => {
 
     let results = await Restaurant.aggregate(pipeline);
 
-    // Regex handles partial matches; this fallback adds bounded typo tolerance.
     if (q && results.length === 0) {
       const candidates = await Restaurant.find({ isApproved: true }).lean();
       results = candidates
@@ -288,17 +226,8 @@ exports.searchRestaurants = async (req, res) => {
         .slice((pageNumber - 1) * limitNumber, pageNumber * limitNumber);
     }
 
-    return res.status(200).json({
-      success: true,
-      filters: req.query,
-      count: results.length,
-      data: results
-    });
+    return res.status(200).json({ success: true, filters: req.query, count: results.length, data: results });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Error searching restaurants',
-      error: error.message
-    });
+    return res.status(500).json({ success: false, message: 'Error searching restaurants', error: error.message });
   }
 };
