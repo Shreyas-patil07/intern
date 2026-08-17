@@ -16,6 +16,19 @@ exports.protect = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Access denied' });
     }
 
+    if (user.fraudRestrictedUntil) {
+      if (user.fraudRestrictedUntil > new Date()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Account temporarily restricted due to suspicious activity',
+          restrictedUntil: user.fraudRestrictedUntil
+        });
+      }
+
+      user.fraudRestrictedUntil = null;
+      await user.save();
+    }
+
     req.user = user;
     next();
   } catch (error) {
