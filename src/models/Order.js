@@ -20,6 +20,16 @@ const orderSchema = new mongoose.Schema(
     couponCode: { type: String, trim: true, uppercase: true },
     paymentStatus: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' },
     orderStatus: { type: String, enum: ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'], default: 'pending' },
+    statusHistory: [
+      {
+        status: {
+          type: String,
+          enum: ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled']
+        },
+        changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+        changedAt: { type: Date, default: Date.now }
+      }
+    ],
     refundRequested: { type: Boolean, default: false },
     fraudRiskScore: { type: Number, default: 0, min: 0 },
     isSuspicious: { type: Boolean, default: false, index: true },
@@ -33,5 +43,12 @@ const orderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+orderSchema.pre('validate', function (next) {
+  if (this.isNew && this.statusHistory.length === 0) {
+    this.statusHistory.push({ status: this.orderStatus, changedBy: this.user });
+  }
+  next();
+});
 
 module.exports = mongoose.model('Order', orderSchema);
