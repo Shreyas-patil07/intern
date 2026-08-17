@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/authRoutes');
 const restaurantRoutes = require('./routes/restaurantRoute');
+const menuRoutes = require('./routes/menuRoute');
 
 const app = express();
 
@@ -11,6 +12,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/restaurants', restaurantRoutes);
+app.use('/api/menu', menuRoutes);
 
 app.get('/', (req, res) => {
   res.status(200).json({
