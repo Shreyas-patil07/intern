@@ -9,6 +9,7 @@ const {
   cancelOrder,
   requestRefund,
   getMyOrders,
+  getOrderById,
   getRestaurantOrders
 } = require('../controllers/orderController');
 
@@ -23,5 +24,6 @@ router.post('/cancel/:orderId', authorize('user'), cancelOrder);
 router.post('/refund/:orderId', authorize('user'), requestRefund);
 router.get('/my', authorize('user'), getMyOrders);
 router.get('/restaurant', authorize('restaurant'), getRestaurantOrders);
+router.get('/:orderId', getOrderById);
 
 module.exports = router;
