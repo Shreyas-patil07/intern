@@ -4,6 +4,7 @@ const Restaurant = require('../models/restaurant');
 const { assessOrder } = require('../services/fraudService');
 const { calculateDeliveryFee } = require('../services/surgePricingService');
 const { assignDeliveryPartner } = require('../services/deliveryAssignmentService');
+const { emitOrderStatusChange } = require('../services/realtimeService');
 
 const calculateDelivery = async (req, res) => {
   try {
@@ -65,6 +66,7 @@ const placeOrder = async (req, res) => {
     await Cart.findOneAndDelete({ user: req.user._id });
     const fraudAssessment = await assessOrder({ order, couponCode });
     const assignment = await assignOrder(order);
+    await emitOrderStatusChange({ order, previousStatus: null, changedBy: req.user._id });
 
     return res.status(201).json({
       success: true,
@@ -73,12 +75,72 @@ const placeOrder = async (req, res) => {
       pricing,
       fraud: { riskScore: fraudAssessment.riskScore, suspicious: fraudAssessment.suspicious, reasons: fraudAssessment.reasons },
       deliveryAssignment: assignment
-        ? {
-            status: 'assigned',
-            partnerId: assignment.partner.user,
-            distanceMeters: assignment.distanceMeters
-          }
+        ? { status: 'assigned', partnerId: assignment.partner.user, distanceMeters: assignment.distanceMeters }
         : { status: 'unassigned', reason: 'No available delivery partner with a valid location' }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateOrderStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const allowedStatuses = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Allowed values: ${allowedStatuses.join(', ')}`
+      });
+    }
+
+    const order = await Order.findById(req.params.orderId).populate('restaurant', 'owner');
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    const isAdmin = req.user.role === 'admin';
+    const isRestaurantOwner = req.user.role === 'restaurant' && order.restaurant.owner.toString() === req.user._id.toString();
+    const isAssignedPartner = req.user.role === 'delivery' && order.assignedDeliveryPartner?.toString() === req.user._id.toString();
+
+    if (!isAdmin && !isRestaurantOwner && !isAssignedPartner) {
+      return res.status(403).json({ success: false, message: 'You are not authorized to update this order' });
+    }
+
+    const restaurantStatuses = ['confirmed', 'preparing', 'cancelled'];
+    const deliveryStatuses = ['out_for_delivery', 'delivered'];
+
+    if (!isAdmin && isRestaurantOwner && !restaurantStatuses.includes(status)) {
+      return res.status(403).json({ success: false, message: 'Restaurant can only set confirmed, preparing, or cancelled' });
+    }
+
+    if (!isAdmin && isAssignedPartner && !deliveryStatuses.includes(status)) {
+      return res.status(403).json({ success: false, message: 'Delivery partner can only set out_for_delivery or delivered' });
+    }
+
+    const previousStatus = order.orderStatus;
+    if (previousStatus === status) {
+      return res.status(400).json({ success: false, message: 'Order is already in this status' });
+    }
+
+    order.orderStatus = status;
+    order.statusHistory.push({ status, changedBy: req.user._id, changedAt: new Date() });
+
+    if (status === 'delivered') {
+      order.assignmentStatus = 'completed';
+    }
+
+    await order.save();
+    const notification = await emitOrderStatusChange({
+      order,
+      previousStatus,
+      changedBy: req.user._id
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Order status updated successfully',
+      data: order,
+      notification
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -94,9 +156,13 @@ const mockPayment = async (req, res) => {
     if (order.user.toString() !== req.user._id.toString()) return res.status(403).json({ success: false, message: 'You are not authorized to pay for this order' });
     if (order.isSuspicious) return res.status(403).json({ success: false, message: 'Order is pending fraud review before payment can be completed' });
 
+    const previousStatus = order.orderStatus;
     order.paymentStatus = 'paid';
     order.orderStatus = 'confirmed';
+    order.statusHistory.push({ status: 'confirmed', changedBy: req.user._id, changedAt: new Date() });
     await order.save();
+    await emitOrderStatusChange({ order, previousStatus, changedBy: req.user._id });
+
     return res.status(200).json({ success: true, message: 'Mock payment successful' });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -110,10 +176,14 @@ const cancelOrder = async (req, res) => {
     if (order.user.toString() !== req.user._id.toString()) return res.status(403).json({ success: false, message: 'You are not authorized to cancel this order' });
     if (!['pending', 'confirmed'].includes(order.orderStatus)) return res.status(400).json({ success: false, message: 'This order can no longer be cancelled' });
 
+    const previousStatus = order.orderStatus;
     order.orderStatus = 'cancelled';
     order.assignmentStatus = 'completed';
+    order.statusHistory.push({ status: 'cancelled', changedBy: req.user._id, changedAt: new Date() });
     await order.save();
     const fraudAssessment = await assessOrder({ order });
+    await emitOrderStatusChange({ order, previousStatus, changedBy: req.user._id });
+
     return res.status(200).json({ success: true, message: 'Order cancelled successfully', data: order, fraud: fraudAssessment });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -189,4 +259,14 @@ const getRestaurantOrders = async (req, res) => {
   }
 };
 
-module.exports = { calculateDelivery, placeOrder, mockPayment, cancelOrder, requestRefund, getMyOrders, getOrderById, getRestaurantOrders };
+module.exports = {
+  calculateDelivery,
+  placeOrder,
+  updateOrderStatus,
+  mockPayment,
+  cancelOrder,
+  requestRefund,
+  getMyOrders,
+  getOrderById,
+  getRestaurantOrders
+};
