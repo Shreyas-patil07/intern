@@ -13,7 +13,9 @@ const {
   getFraudOrders,
   approveFraudOrder,
   rejectFraudOrder,
-  restrictFraudUser
+  restrictFraudUser,
+  getSurgeSettings,
+  updateSurgeSettings
 } = require('../controllers/AdminController');
 
 router.use(protect);
@@ -31,5 +33,8 @@ router.get('/fraud/orders', getFraudOrders);
 router.put('/fraud/orders/:orderId/approve', approveFraudOrder);
 router.put('/fraud/orders/:orderId/reject', rejectFraudOrder);
 router.put('/fraud/orders/:orderId/restrict-user', restrictFraudUser);
+
+router.get('/surge-settings', getSurgeSettings);
+router.put('/surge-settings', updateSurgeSettings);
 
 module.exports = router;
