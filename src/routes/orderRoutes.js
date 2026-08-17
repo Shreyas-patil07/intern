@@ -5,6 +5,7 @@ const { protect, authorize } = require('../middleware/authMiddleware');
 const {
   calculateDelivery,
   placeOrder,
+  updateOrderStatus,
   mockPayment,
   cancelOrder,
   requestRefund,
@@ -18,6 +19,7 @@ router.use(protect);
 router.post('/calculate-delivery-fee', authorize('user'), calculateDelivery);
 router.post('/', authorize('user'), placeOrder);
 router.post('/create', authorize('user'), placeOrder);
+router.put('/update-status/:orderId', updateOrderStatus);
 router.post('/verify', authorize('user'), mockPayment);
 router.post('/:orderId/pay', authorize('user'), mockPayment);
 router.post('/cancel/:orderId', authorize('user'), cancelOrder);
