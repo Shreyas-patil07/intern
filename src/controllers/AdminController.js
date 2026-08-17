@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Restaurant = require('../models/restaurant');
 const Order = require('../models/Order');
+const DeliveryPartner = require('../models/DeliveryPartner');
 const FraudReview = require('../models/FraudReview');
 const SurgeSetting = require('../models/SurgeSetting');
 
@@ -47,7 +48,7 @@ exports.updateRestaurant = async (req, res) => {
   try {
     const restaurant = await Restaurant.findById(req.params.restaurantId);
     if (!restaurant) return res.status(404).json({ success: false, message: 'Restaurant not found' });
-    const allowedFields = ['name','city','address','cuisine','rating','priceRange','estimatedDeliveryTime','isVegOnly','popularity','image','isApproved'];
+    const allowedFields = ['name','city','address','cuisine','rating','priceRange','estimatedDeliveryTime','isVegOnly','popularity','image','isApproved','location'];
     for (const field of allowedFields) if (req.body[field] !== undefined) restaurant[field] = req.body[field];
     await restaurant.save();
     return res.status(200).json({ success: true, message: 'Restaurant updated successfully by admin', data: restaurant });
@@ -56,7 +57,7 @@ exports.updateRestaurant = async (req, res) => {
 
 exports.getAllOrders = async (req, res) => {
   try {
-    const orders = await Order.find().populate('user', 'name email').populate('restaurant', 'name');
+    const orders = await Order.find().populate('user', 'name email').populate('restaurant', 'name').populate('assignedDeliveryPartner', 'name email');
     return res.status(200).json({ success: true, data: orders, count: orders.length });
   } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
 };
@@ -66,8 +67,9 @@ exports.getPlatformStatistics = async (req, res) => {
     const totalUsers = await User.countDocuments();
     const totalRestaurants = await Restaurant.countDocuments();
     const totalOrders = await Order.countDocuments();
+    const totalDeliveryPartners = await DeliveryPartner.countDocuments();
     const revenueResult = await Order.aggregate([{ $match: { paymentStatus: 'paid' } }, { $group: { _id: null, totalRevenue: { $sum: { $add: ['$totalAmount', '$deliveryFee'] } } } }]);
-    return res.status(200).json({ success: true, data: { totalUsers, totalRestaurants, totalOrders, totalRevenue: revenueResult[0]?.totalRevenue || 0 } });
+    return res.status(200).json({ success: true, data: { totalUsers, totalRestaurants, totalOrders, totalDeliveryPartners, totalRevenue: revenueResult[0]?.totalRevenue || 0 } });
   } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
 };
 
@@ -125,4 +127,23 @@ exports.updateSurgeSettings = async (req, res) => {
     const settings = await SurgeSetting.findOneAndUpdate({ singleton: 'default' }, { $set: update, $setOnInsert: { singleton: 'default' } }, { new: true, upsert: true, runValidators: true });
     return res.status(200).json({ success: true, message: 'Surge settings updated successfully', data: settings });
   } catch (error) { return res.status(400).json({ success: false, message: error.message }); }
+};
+
+exports.getDeliveryPartners = async (req, res) => {
+  try {
+    const partners = await DeliveryPartner.find().sort({ available: -1, currentOrdersCount: 1 }).populate('user', 'name email role isblocked');
+    return res.status(200).json({ success: true, data: partners, count: partners.length });
+  } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
+};
+
+exports.setDeliveryPartnerAvailability = async (req, res) => {
+  try {
+    const partner = await DeliveryPartner.findOneAndUpdate(
+      { user: req.params.userId },
+      { available: Boolean(req.body.available) },
+      { new: true }
+    );
+    if (!partner) return res.status(404).json({ success: false, message: 'Delivery partner not found' });
+    return res.status(200).json({ success: true, data: partner });
+  } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
 };
