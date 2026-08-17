@@ -1,4 +1,3 @@
-const mongoose = require('mongoose');
 const User = require('../models/User');
 const Order = require('../models/Order');
 const Restaurant = require('../models/restaurant');
@@ -23,17 +22,12 @@ const updateUserPreferences = async (userId, orderId) => {
     if (key) itemCounts.set(key, (itemCounts.get(key) || 0) + item.quantity);
   }
 
-  const cuisines = [...cuisineCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 20)
-    .map(([name, count]) => ({ name, count }));
+  user.preferenceProfile = {
+    cuisines: [...cuisineCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([name, count]) => ({ name, count })),
+    items: [...itemCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([name, count]) => ({ name, count })),
+    ordersCount: (user.preferenceProfile?.ordersCount || 0) + 1
+  };
 
-  const items = [...itemCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 30)
-    .map(([name, count]) => ({ name, count }));
-
-  user.preferenceProfile = { cuisines, items, ordersCount: (user.preferenceProfile?.ordersCount || 0) + 1 };
   await user.save();
   return user.preferenceProfile;
 };
@@ -43,22 +37,45 @@ const getRecommendations = async (userId, { limit = 10 } = {}) => {
   if (!user) throw new Error('User not found');
 
   const cuisinePreferences = (user.preferenceProfile?.cuisines || []).map((item) => item.name);
-  const itemPreferences = (user.preferenceProfile?.items || []).map((item) => item.name.toLowerCase());
+  const itemPreferences = (user.preferenceProfile?.items || []).map((item) => item.name);
   const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 50);
+
+  if (cuisinePreferences.length === 0 && itemPreferences.length === 0) {
+    return Restaurant.find({ isApproved: true })
+      .sort({ rating: -1, popularity: -1 })
+      .limit(safeLimit)
+      .select('name city address cuisine rating priceRange estimatedDeliveryTime isVegOnly popularity image')
+      .lean();
+  }
 
   const pipeline = [
     { $match: { isApproved: true } },
     {
+      $lookup: {
+        from: 'menus',
+        let: { restaurantId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$restaurant', '$$restaurantId'] } } },
+          { $project: { name: 1 } }
+        ],
+        as: 'menuItems'
+      }
+    },
+    {
       $addFields: {
         cuisineMatches: {
           $size: {
-            $setIntersection: [
-              { $ifNull: ['$cuisine', []] },
-              cuisinePreferences
-            ]
+            $setIntersection: [{ $ifNull: ['$cuisine', []] }, cuisinePreferences]
           }
         },
-        normalizedMenuHint: { $ifNull: ['$cuisine', []] }
+        itemMatches: {
+          $size: {
+            $setIntersection: [
+              { $map: { input: '$menuItems', as: 'item', in: '$$item.name' } },
+              itemPreferences
+            ]
+          }
+        }
       }
     },
     {
@@ -66,9 +83,9 @@ const getRecommendations = async (userId, { limit = 10 } = {}) => {
         recommendationScore: {
           $add: [
             { $multiply: ['$cuisineMatches', 35] },
+            { $multiply: ['$itemMatches', 20] },
             { $multiply: [{ $ifNull: ['$rating', 0] }, 8] },
-            { $multiply: [{ $ln: { $add: [{ $ifNull: ['$popularity', 0] }, 1] } }, 6] },
-            { $cond: [{ $gt: [{ $size: { $setIntersection: [{ $ifNull: ['$cuisine', []] }, cuisinePreferences] } }, 0] }, 10, 0] }
+            { $multiply: [{ $ln: { $add: [{ $ifNull: ['$popularity', 0] }, 1] } }, 6] }
           ]
         }
       }
@@ -88,20 +105,13 @@ const getRecommendations = async (userId, { limit = 10 } = {}) => {
         popularity: 1,
         image: 1,
         recommendationScore: { $round: ['$recommendationScore', 2] },
-        cuisineMatches: 1
+        cuisineMatches: 1,
+        itemMatches: 1
       }
     }
   ];
 
-  const recommendations = await Restaurant.aggregate(pipeline);
-
-  if (recommendations.length > 0 && cuisinePreferences.length > 0) return recommendations;
-
-  return Restaurant.find({ isApproved: true })
-    .sort({ rating: -1, popularity: -1 })
-    .limit(safeLimit)
-    .select('name city address cuisine rating priceRange estimatedDeliveryTime isVegOnly popularity image')
-    .lean();
+  return Restaurant.aggregate(pipeline);
 };
 
 module.exports = { updateUserPreferences, getRecommendations };
