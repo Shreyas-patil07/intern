@@ -3,6 +3,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const authRoutes = require('./routes/authRoutes');
 const restaurantRoutes = require('./routes/restaurantRoute');
+const recommendationRoutes = require('./routes/recommendationRoutes');
 const menuRoutes = require('./routes/menuRoute');
 const cartRoutes = require('./routes/cartRoutes');
 const orderRoutes = require('./routes/orderRoutes');
@@ -18,6 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/restaurants', restaurantRoutes);
+app.use('/api/restaurants/recommendations', recommendationRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
