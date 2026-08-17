@@ -7,7 +7,11 @@ const {
   toggleBlockUser,
   approveRestaurant,
   getAllOrders,
-  getPlatformStatistics
+  getPlatformStatistics,
+  getFraudOrders,
+  approveFraudOrder,
+  rejectFraudOrder,
+  restrictFraudUser
 } = require('../controllers/AdminController');
 
 router.use(protect);
@@ -18,5 +22,10 @@ router.put('/users/:id/block', toggleBlockUser);
 router.put('/restaurant/:id/approve', approveRestaurant);
 router.get('/statistics', getPlatformStatistics);
 router.get('/orders', getAllOrders);
+
+router.get('/fraud/orders', getFraudOrders);
+router.put('/fraud/orders/:orderId/approve', approveFraudOrder);
+router.put('/fraud/orders/:orderId/reject', rejectFraudOrder);
+router.put('/fraud/orders/:orderId/restrict-user', restrictFraudUser);
 
 module.exports = router;
