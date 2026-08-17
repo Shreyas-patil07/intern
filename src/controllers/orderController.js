@@ -3,6 +3,7 @@ const Cart = require('../models/Cart');
 const Restaurant = require('../models/restaurant');
 const { assessOrder } = require('../services/fraudService');
 const { calculateDeliveryFee } = require('../services/surgePricingService');
+const { assignDeliveryPartner } = require('../services/deliveryAssignmentService');
 
 const calculateDelivery = async (req, res) => {
   try {
@@ -18,6 +19,22 @@ const calculateDelivery = async (req, res) => {
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
+};
+
+const assignOrder = async (order) => {
+  const restaurant = await Restaurant.findById(order.restaurant).select('location');
+  const assignment = await assignDeliveryPartner(restaurant?.location);
+
+  if (!assignment) return null;
+
+  order.assignedDeliveryPartner = assignment.partner.user;
+  order.assignmentStatus = 'assigned';
+  order.assignmentDistanceMeters = assignment.distanceMeters;
+  order.assignedAt = new Date();
+  order.assignmentAttempts += 1;
+  await order.save();
+
+  return assignment;
 };
 
 const placeOrder = async (req, res) => {
@@ -47,13 +64,21 @@ const placeOrder = async (req, res) => {
 
     await Cart.findOneAndDelete({ user: req.user._id });
     const fraudAssessment = await assessOrder({ order, couponCode });
+    const assignment = await assignOrder(order);
 
     return res.status(201).json({
       success: true,
       message: fraudAssessment.suspicious ? 'Order placed and flagged for fraud review' : 'Order placed successfully',
       data: order,
       pricing,
-      fraud: { riskScore: fraudAssessment.riskScore, suspicious: fraudAssessment.suspicious, reasons: fraudAssessment.reasons }
+      fraud: { riskScore: fraudAssessment.riskScore, suspicious: fraudAssessment.suspicious, reasons: fraudAssessment.reasons },
+      deliveryAssignment: assignment
+        ? {
+            status: 'assigned',
+            partnerId: assignment.partner.user,
+            distanceMeters: assignment.distanceMeters
+          }
+        : { status: 'unassigned', reason: 'No available delivery partner with a valid location' }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -86,6 +111,7 @@ const cancelOrder = async (req, res) => {
     if (!['pending', 'confirmed'].includes(order.orderStatus)) return res.status(400).json({ success: false, message: 'This order can no longer be cancelled' });
 
     order.orderStatus = 'cancelled';
+    order.assignmentStatus = 'completed';
     await order.save();
     const fraudAssessment = await assessOrder({ order });
     return res.status(200).json({ success: true, message: 'Order cancelled successfully', data: order, fraud: fraudAssessment });
@@ -113,8 +139,36 @@ const requestRefund = async (req, res) => {
 
 const getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 }).populate('restaurant', 'name city address image').populate('items.menuItem', 'name price image');
+    const orders = await Order.find({ user: req.user._id })
+      .sort({ createdAt: -1 })
+      .populate('restaurant', 'name city address image location')
+      .populate('items.menuItem', 'name price image')
+      .populate('assignedDeliveryPartner', 'name email role');
     return res.status(200).json({ success: true, data: orders });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getOrderById = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId)
+      .populate('restaurant', 'name city address image location')
+      .populate('items.menuItem', 'name price image')
+      .populate('user', 'name email')
+      .populate('assignedDeliveryPartner', 'name email role');
+
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    const isOwner = order.user._id.toString() === req.user._id.toString();
+    const isAssignedPartner = order.assignedDeliveryPartner?._id?.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isOwner && !isAssignedPartner && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'You are not authorized to view this order' });
+    }
+
+    return res.status(200).json({ success: true, data: order });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -124,11 +178,15 @@ const getRestaurantOrders = async (req, res) => {
   try {
     const restaurant = await Restaurant.findOne({ owner: req.user._id });
     if (!restaurant) return res.status(404).json({ success: false, message: "You don't have a restaurant registered" });
-    const orders = await Order.find({ restaurant: restaurant._id }).sort({ createdAt: -1 }).populate('user', 'name email').populate('items.menuItem', 'name price image');
+    const orders = await Order.find({ restaurant: restaurant._id })
+      .sort({ createdAt: -1 })
+      .populate('user', 'name email')
+      .populate('items.menuItem', 'name price image')
+      .populate('assignedDeliveryPartner', 'name email role');
     return res.status(200).json({ success: true, data: orders });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-module.exports = { calculateDelivery, placeOrder, mockPayment, cancelOrder, requestRefund, getMyOrders, getRestaurantOrders };
+module.exports = { calculateDelivery, placeOrder, mockPayment, cancelOrder, requestRefund, getMyOrders, getOrderById, getRestaurantOrders };
