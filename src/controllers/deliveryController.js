@@ -1,6 +1,7 @@
 const DeliveryPartner = require('../models/DeliveryPartner');
 const Order = require('../models/Order');
 const { assignDeliveryPartner, releaseDeliveryPartner } = require('../services/deliveryAssignmentService');
+const { emitDeliveryAssignmentChange } = require('../services/realtimeService');
 
 exports.setStatus = async (req, res) => {
   try {
@@ -69,9 +70,10 @@ exports.declineOrder = async (req, res) => {
     await releaseDeliveryPartner(previousPartnerId);
 
     order.deliveryAssignmentHistory.push(previousPartnerId);
-    order.assignedDeliveryPartner = undefined;
+    order.assignedDeliveryPartner = null;
     order.assignmentStatus = 'unassigned';
     await order.save();
+    await emitDeliveryAssignmentChange({ order, partnerId: null, previousPartnerId });
 
     const assignment = await assignDeliveryPartner(order.restaurant.location, {
       excludePartnerIds: order.deliveryAssignmentHistory
@@ -91,6 +93,7 @@ exports.declineOrder = async (req, res) => {
     order.assignedAt = new Date();
     order.assignmentAttempts += 1;
     await order.save();
+    await emitDeliveryAssignmentChange({ order, partnerId: assignment.partner.user, previousPartnerId });
 
     return res.status(200).json({
       success: true,
