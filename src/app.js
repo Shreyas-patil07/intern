@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const mongoose = require('mongoose');
 const authRoutes = require('./routes/authRoutes');
 const restaurantRoutes = require('./routes/restaurantRoute');
 const menuRoutes = require('./routes/menuRoute');
@@ -24,6 +25,13 @@ app.get('/', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Welcome to Swiggy API'
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
 });
 
