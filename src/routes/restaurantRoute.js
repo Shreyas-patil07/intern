@@ -5,10 +5,12 @@ const {
   createRestaurant,
   getMyRestaurant,
   updateRestaurant,
-  getAllRestaurants
+  getAllRestaurants,
+  searchRestaurants
 } = require('../controllers/restaurantController');
 const { protect } = require('../middleware/authMiddleware');
 
+router.get('/search', searchRestaurants);
 router.post('/', protect, createRestaurant);
 router.get('/my', protect, getMyRestaurant);
 router.put('/:id', protect, updateRestaurant);
